@@ -1,7 +1,7 @@
 """
 save_model.py – Crop Yield Regression
 Run: python save_model.py
-Output: model.joblib, feature_columns.joblib, encoders.joblib
+Output: model.joblib, feature_columns.joblib, encoders.joblib, num_stats.joblib
 """
 
 from __future__ import annotations
@@ -15,9 +15,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 # ── Constants ────────────────────────────────────────────────────────────────
-TARGET      = "Yield"
-ID_COL      = "id"
-TRAIN_CSV   = "crop_yield_train.csv"
+TARGET    = "yield_tpha"   # ✅ Düzeltildi
+ID_COL    = "id"
+TRAIN_CSV = "crop_yield_train.csv"
+
+# Modele dahil edilmeyecek sütunlar (id, tarih, alan kodu)
+DROP_COLS = {"id", "harvest_date", "field_id"}
 
 
 def load_and_prepare(path: str) -> pd.DataFrame:
@@ -27,9 +30,9 @@ def load_and_prepare(path: str) -> pd.DataFrame:
     return df
 
 
-def get_col_types(df: pd.DataFrame, target: str, id_col: str):
-    """Kategorik ve sayısal sütunları otomatik tespit et."""
-    exclude = {target, id_col} if id_col in df.columns else {target}
+def get_col_types(df: pd.DataFrame, target: str):
+    """Kategorik ve sayısal özellik sütunlarını tespit et."""
+    exclude = DROP_COLS | {target}
     feature_cols = [c for c in df.columns if c not in exclude]
     cat_cols = [c for c in feature_cols if df[c].dtype == object]
     num_cols = [c for c in feature_cols if df[c].dtype != object]
@@ -37,14 +40,15 @@ def get_col_types(df: pd.DataFrame, target: str, id_col: str):
 
 
 def main() -> None:
-    # ── Load ─────────────────────────────────────────────────────────────────
+    # ── Veri yükle ───────────────────────────────────────────────────────────
     df = load_and_prepare(TRAIN_CSV)
 
-    feature_cols, cat_cols, num_cols = get_col_types(df, TARGET, ID_COL)
+    feature_cols, cat_cols, num_cols = get_col_types(df, TARGET)
 
     print(f"\nHedef          : {TARGET}")
     print(f"Kategorik ({len(cat_cols)}): {cat_cols}")
     print(f"Sayısal   ({len(num_cols)}): {num_cols}")
+    print(f"Toplam özellik : {len(feature_cols)}")
 
     # ── Eksik değerler ───────────────────────────────────────────────────────
     for col in num_cols:
@@ -83,15 +87,26 @@ def main() -> None:
     print(f"MAE  : {mae:.4f}")
     print(f"R²   : {r2:.4f}")
 
+    # ── Sayısal istatistikler (slider aralıkları için) ───────────────────────
+    stats = {
+        col: {
+            "min":  float(df[col].min()),
+            "max":  float(df[col].max()),
+            "mean": float(df[col].mean()),
+        }
+        for col in num_cols
+    }
+
     # ── Kaydet ───────────────────────────────────────────────────────────────
     joblib.dump(model,        "model.joblib")
     joblib.dump(feature_cols, "feature_columns.joblib")
     joblib.dump(encoders,     "encoders.joblib")
-    # Uygulama için istatistik kaydet
-    stats = {col: {"min": float(df[col].min()), "max": float(df[col].max()),
-                   "mean": float(df[col].mean())} for col in num_cols}
-    joblib.dump(stats, "num_stats.joblib")
-    print("\n✅ model.joblib, feature_columns.joblib, encoders.joblib, num_stats.joblib kaydedildi.")
+    joblib.dump(stats,        "num_stats.joblib")
+
+    print(
+        "\n✅ Kaydedildi: model.joblib | feature_columns.joblib | "
+        "encoders.joblib | num_stats.joblib"
+    )
 
 
 if __name__ == "__main__":

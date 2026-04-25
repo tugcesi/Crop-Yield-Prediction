@@ -13,7 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Page config ───────────────────────────────────────────────���──────────────
 st.set_page_config(
     page_title="🌾 Crop Yield Predictor",
     page_icon="🌾",
@@ -27,7 +27,7 @@ ENCODERS_PATH = Path("encoders.joblib")
 STATS_PATH    = Path("num_stats.joblib")
 
 
-# ── Load artifacts ───────────────────────────────────────────────────────────
+# ── Artefaktları yükle ───────────────────────────────────────────────────────
 @st.cache_resource
 def load_artifacts():
     paths = [MODEL_PATH, FEATURES_PATH, ENCODERS_PATH, STATS_PATH]
@@ -49,47 +49,74 @@ if model is None:
     )
     st.stop()
 
-# ── Title ────────────────────────────────────────────────────────────────────
+# ── Başlık ───────────────────────────────────────────────────────────────────
 st.title("🌾 Crop Yield Predictor")
-st.markdown("Tarım koşullarını girerek **ürün verimini (Yield)** tahmin edin.")
+st.markdown(
+    "Tarım koşullarını girerek **ürün verimini (yield_tpha)** tahmin edin."
+)
 st.markdown("---")
 
-# ── Sidebar inputs ───────────────────────────────────────────────────────────
+# ── Sidebar girişleri ────────────────────────────────────────────────────────
 st.sidebar.header("🌱 Tarım Parametreleri")
+
+FRIENDLY_LABELS = {
+    "soil_ph":              "Toprak pH",
+    "soil_moisture":        "Toprak Nemi (%)",
+    "avg_temperature":      "Ort. Sıcaklık (°C)",
+    "total_rainfall":       "Toplam Yağış (mm)",
+    "fertilizer_amount":    "Gübre Miktarı (kg)",
+    "pesticide_usage":      "Pestisit Kullanımı",
+    "sunlight_hours":       "Güneş Işığı (saat/yıl)",
+    "nitrogen_content":     "Azot İçeriği (N)",
+    "phosphorus_content":   "Fosfor İçeriği (P)",
+    "potassium_content":    "Potasyum İçeriği (K)",
+    "irrigation_frequency": "Sulama Sıklığı",
+    "crop_type":            "Ürün Türü",
+    "region":               "Bölge",
+    "season":               "Mevsim",
+}
 
 user_input: dict = {}
 
 for col in feature_columns:
+    label = FRIENDLY_LABELS.get(col, col)
+
     if col in encoders:
         # Kategorik → selectbox
-        le = encoders[col]
-        options = list(le.classes_)
-        selected = st.sidebar.selectbox(col, options)
-        user_input[col] = selected          # ham değer; encode edilecek
+        options = list(encoders[col].classes_)
+        user_input[col] = st.sidebar.selectbox(label, options)
+
     elif col in num_stats:
         stats = num_stats[col]
         lo    = float(stats["min"])
         hi    = float(stats["max"])
         mean  = float(stats["mean"])
-        # Büyük aralıklı sütunlar için number_input, küçükler için slider
-        if hi - lo > 1000:
-            val = st.sidebar.number_input(
-                col, min_value=lo, max_value=hi * 2, value=mean, format="%.2f"
+
+        # Geniş aralıklı sütunlar için number_input, diğerleri için slider
+        if hi - lo > 500:
+            user_input[col] = st.sidebar.number_input(
+                label,
+                min_value=round(lo, 2),
+                max_value=round(hi * 1.5, 2),
+                value=round(mean, 2),
+                step=round((hi - lo) / 200, 2),
+                format="%.2f",
             )
         else:
-            val = st.sidebar.slider(
-                col, min_value=lo, max_value=hi, value=mean, step=(hi - lo) / 200
+            user_input[col] = st.sidebar.slider(
+                label,
+                min_value=round(lo, 2),
+                max_value=round(hi, 2),
+                value=round(mean, 2),
+                step=round((hi - lo) / 200, 4),
             )
-        user_input[col] = val
     else:
-        # Bilinmeyen sütun – sayısal varsay
-        val = st.sidebar.number_input(col, value=0.0)
-        user_input[col] = val
+        user_input[col] = st.sidebar.number_input(label, value=0.0)
 
 predict_btn = st.sidebar.button("🔍 Tahmin Et", use_container_width=True)
 
 
-# ── Build feature row ────────────────────────────────────────────────────────
+# ── Özellik vektörü oluştur ──────────────────────────────────────────────────
 def build_input_df() -> pd.DataFrame:
     row = {}
     for col in feature_columns:
@@ -104,52 +131,66 @@ def build_input_df() -> pd.DataFrame:
     return pd.DataFrame([row])[feature_columns].astype(float)
 
 
-# ── Prediction ───────────────────────────────────────────────────────────────
+# ── Tahmin ───────────────────────────────────────────────────────────────────
 if predict_btn:
     X_input    = build_input_df()
     prediction = float(model.predict(X_input)[0])
 
-    # Sonuç gösterimi
-    col1, col2 = st.columns([1, 1])
+    left, right = st.columns(2)
 
-    with col1:
-        st.success(f"🌾 Tahmini Ürün Verimi: **{prediction:,.2f}**")
+    with left:
+        st.success(f"### 🌾 Tahmini Verim: **{prediction:,.3f} t/ha**")
 
-        # Girdi özeti tablosu
-        st.markdown("### 📋 Girilen Değerler")
-        summary_df = pd.DataFrame({
-            "Özellik": list(user_input.keys()),
-            "Değer":   [str(v) for v in user_input.values()],
-        })
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        # Girdi özeti
+        st.markdown("#### 📋 Girilen Değerler")
+        summary_rows = []
+        for col in feature_columns:
+            summary_rows.append({
+                "Özellik": FRIENDLY_LABELS.get(col, col),
+                "Değer":   str(user_input[col]),
+            })
+        st.dataframe(
+            pd.DataFrame(summary_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    with col2:
+    with right:
         # Gauge chart
-        max_gauge = max(prediction * 2, 1.0)
+        max_gauge = max(prediction * 2, 5.0)
         fig_gauge = go.Figure(go.Indicator(
             mode="gauge+number",
             value=prediction,
-            number={"valueformat": ",.1f"},
-            title={"text": "Tahmin Edilen Yield"},
+            number={"valueformat": ",.2f", "suffix": " t/ha"},
+            title={"text": "Tahmin Edilen Verim (t/ha)"},
             gauge={
                 "axis":  {"range": [0, max_gauge]},
                 "bar":   {"color": "seagreen"},
                 "steps": [
-                    {"range": [0,              max_gauge * 0.33], "color": "lightyellow"},
-                    {"range": [max_gauge * 0.33, max_gauge * 0.66], "color": "lightgreen"},
-                    {"range": [max_gauge * 0.66, max_gauge],        "color": "mediumseagreen"},
+                    {"range": [0,                    max_gauge * 0.33], "color": "#fff9c4"},
+                    {"range": [max_gauge * 0.33,     max_gauge * 0.66], "color": "#a5d6a7"},
+                    {"range": [max_gauge * 0.66,     max_gauge],        "color": "#2e7d32"},
                 ],
+                "threshold": {
+                    "line":  {"color": "red", "width": 4},
+                    "thickness": 0.75,
+                    "value": prediction,
+                },
             },
         ))
-        fig_gauge.update_layout(height=320)
+        fig_gauge.update_layout(height=340)
         st.plotly_chart(fig_gauge, use_container_width=True)
 
-    # Feature importance
+    # ── Özellik önemi ─────────────────────────────────────────────────────────
+    st.markdown("---")
     st.markdown("### 📊 Özellik Önemi")
     if hasattr(model, "feature_importances_"):
         importances = model.feature_importances_
         fi_df = (
-            pd.DataFrame({"Özellik": feature_columns, "Önem": importances})
+            pd.DataFrame({
+                "Özellik": [FRIENDLY_LABELS.get(c, c) for c in feature_columns],
+                "Önem":    importances,
+            })
             .sort_values("Önem", ascending=True)
         )
         fig_fi = go.Figure(go.Bar(
@@ -159,31 +200,35 @@ if predict_btn:
             marker_color="seagreen",
         ))
         fig_fi.update_layout(
-            title="Özellik Önemi (LightGBM)",
+            title="LightGBM – Özellik Önemi",
             xaxis_title="Önem Skoru",
-            yaxis_title="Özellik",
-            height=max(350, len(feature_columns) * 30),
+            yaxis_title="",
+            height=max(380, len(feature_columns) * 32),
         )
         st.plotly_chart(fig_fi, use_container_width=True)
     else:
-        st.info("Bu model için özellik önemi mevcut değil.")
+        st.info("Bu model için özellik önemi bilgisi mevcut değil.")
 
 else:
-    st.info("👈 Sol panelden tarım parametrelerini girin ve **🔍 Tahmin Et** butonuna tıklayın.")
+    st.info(
+        "👈 Sol panelden tarım parametrelerini girin ve "
+        "**🔍 Tahmin Et** butonuna tıklayın."
+    )
 
-# ── About ────────────────────────────────────────────────────────────────────
+# ── Hakkında ─────────────────────────────────────────────────────────────────
 with st.expander("ℹ️ Proje Hakkında"):
     st.markdown("""
     ### 🌾 Crop Yield Predictor
 
-    Bu uygulama, **Kaggle – Crop Yield Prediction Challenge** yarışması için
-    geliştirilen makine öğrenmesi modelini kullanarak ürün verimini tahmin eder.
+    Bu uygulama **Kaggle – Crop Yield Prediction Challenge** yarışması için
+    geliştirilen makine öğrenmesi modelini kullanarak **ton/hektar (t/ha)** 
+    cinsinden ürün verimini tahmin eder.
 
-    **Kullanılan Yöntemler:**
-    - LightGBM Regressor
-    - Label Encoding (kategorik özellikler için)
-    - Median / Mode ile eksik değer doldurma
+    | Teknik | Açıklama |
+    |---|---|
+    | **LightGBM Regressor** | Hızlı gradient boosting regresyonu |
+    | **Label Encoding** | `crop_type`, `region`, `season` için |
+    | **Median Imputation** | Eksik sayısal değerler için |
 
-    **Veri Kaynağı:**
-    [Kaggle – Crop Yield Prediction Challenge](https://www.kaggle.com/competitions/crop-yield-prediction-challenge)
+    **Veri:** [Kaggle – Crop Yield Prediction](https://www.kaggle.com/competitions/crop-yield-prediction-challenge)
     """)
